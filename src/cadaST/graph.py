@@ -1,9 +1,9 @@
 import numpy as np
+from scipy.sparse import csr_matrix
+from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
-from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-from scipy.sparse import csr_matrix
 
 
 class SimilarityGraph:
@@ -19,8 +19,9 @@ class SimilarityGraph:
         alpha,
         theta,
         init_alpha,
-        icm_iter: int = 2,
+        icm_iter: int = 3,
         max_iter: int = 3,
+        n_components: int = 2,
         convergency_threshold: float = 1e-5,
         verbose: bool = False,
     ) -> None:
@@ -30,17 +31,16 @@ class SimilarityGraph:
         self.kneighbors = kneighbors + 1
         self.graph = self._construct_graph(adata.obsm["spatial"], self.kneighbors)
         self.beta = beta
-        self.icm_iter = icm_iter
-        self.max_iter = max_iter
         self.alpha = alpha
         self.theta = theta
         self.init_alpha = init_alpha
+        self.icm_iter = icm_iter
+        self.max_iter = max_iter
+        self.n_components = n_components
         self.convergency_threshold = convergency_threshold
         self.neighbor_corr = self._neighbor_init(self.alpha)
         if self.verbose:
-            print(
-                f"Initialized model with beta: {self.beta}, alpha: {alpha}, theta: {self.theta}"
-            )
+            print(f"Initialized model with beta: {self.beta}, alpha: {alpha}, theta: {self.theta}")
 
     def fit(
         self,
@@ -50,29 +50,24 @@ class SimilarityGraph:
         Implement HMRF using ICM-EM
         """
         self.exp = self.matrix[gene_id].values
-        self._initialize_labels(self.init_alpha)
+        self._initialize_labels()
         self._update_adj_matrix(self.theta)
-        self._run_icmem(
-            self.beta,
-            self.theta,
-            self.icm_iter,
-            self.max_iter,
-            convergency_threshold=self.convergency_threshold,
-        )
+        self._run_icmem()
 
-    def _initialize_labels(self, init_alpha: float) -> None:
+    def _initialize_labels(self) -> None:
         """
         Initialize label with smoothed expression matrix
         """
         neighbor_corr = self.neighbor_corr.copy()
-        neighbor_corr = neighbor_corr / self.alpha * init_alpha
+        neighbor_corr = neighbor_corr / self.alpha * self.init_alpha
         neighbor_corr.setdiag(1)
         smoothed_exp = neighbor_corr.dot(self.exp)
-        gmm = GaussianMixture(n_components=2).fit(smoothed_exp.reshape(-1, 1))
+        gmm = GaussianMixture(n_components=self.n_components).fit(smoothed_exp.reshape(-1, 1))
         means, covs = gmm.means_.ravel(), gmm.covariances_.ravel()  # type: ignore
         self.cls_para = np.column_stack((means, covs))
         self.labels = gmm.predict(smoothed_exp.reshape(-1, 1))
-        self._label_resort()
+        if self.n_components:
+            self._label_resort()
 
     def _impute(self) -> csr_matrix:
         """
@@ -86,33 +81,31 @@ class SimilarityGraph:
         """
         if self.verbose:
             print("Constructing Graph")
-        graph = (
-            NearestNeighbors(n_neighbors=kneighbors).fit(coord).kneighbors_graph(coord)
-        )
-        self.cell_neighbors = graph.indices.reshape(self.cell_num, kneighbors)
-        return graph
+        graph = NearestNeighbors(n_neighbors=kneighbors).fit(coord).kneighbors_graph(coord)
+        self.cell_neighbors = graph.indices.reshape(self.cell_num, kneighbors)  # type: ignore
+        return graph  # type: ignore
 
     def _label_resort(self) -> None:
         """
         Set the label with the highest mean as 1
         """
         means = self.cls_para[:, 0]
-        cls_label = np.argmax(means)
-        new_labels = np.zeros_like(self.labels)
-        new_labels[self.labels == cls_label] = 1
-        self.labels = new_labels
+        sorted_indices = np.argsort(means)
+        label_map = np.zeros(self.n_components, dtype=int)
+        label_map[sorted_indices] = np.arange(self.n_components)
+        self.labels = label_map[self.labels]
 
     def _run_icmem(
         self,
-        beta,
-        theta,
-        icm_iter: int = 2,
-        max_iter: int = 3,
         convergency_threshold: float = 1e-5,
     ) -> None:
         """
         Run ICM-EM algorithm to update gene panel's labels and integrate neighbor spots expression
         """
+        beta = self.beta
+        theta = self.theta
+        icm_iter = self.icm_iter
+        max_iter = self.max_iter
         sqrt2pi = np.sqrt(2 * np.pi)
         cell_num = self.cell_num
         temp = 1  # TODO add melting mechanism
@@ -123,22 +116,20 @@ class SimilarityGraph:
             changed = 0
             for _ in range(icm_iter):
                 indices = np.arange(cell_num)
-                new_labels = 1 - self.labels[indices]
+                new_labels = np.random.randint(0, self.n_components, size=cell_num)
                 delta_energies = self._delta_energies(indices, new_labels, beta)
                 negative_indices = delta_energies < 0
                 self.labels[indices[negative_indices]] = new_labels[negative_indices]
                 changed += np.sum(negative_indices)
 
                 # Metropolis-Hastings
-                non_negative_indices = np.logical_not(negative_indices)
-                probabilities = np.exp(-delta_energies[non_negative_indices] / temp)
-                probabilities[probabilities == 0] = 1e-5
-                samples = np.random.uniform(0, 1, size=probabilities.shape)
-                update = samples < probabilities
-                self.labels[indices[non_negative_indices][update]] = new_labels[
-                    non_negative_indices
-                ][update]
-                changed += np.sum(update)
+                # non_negative_indices = np.logical_not(negative_indices)
+                # probabilities = np.exp(-delta_energies[non_negative_indices] / temp)
+                # probabilities[probabilities == 0] = 1e-5
+                # samples = np.random.uniform(0, 1, size=probabilities.shape)
+                # update = samples < probabilities
+                # self.labels[indices[non_negative_indices][update]] = new_labels[non_negative_indices][update]
+                # changed += np.sum(update)
 
                 if changed == 0:
                     break
@@ -172,30 +163,77 @@ class SimilarityGraph:
         return
 
     def _delta_energies(self, indices, new_labels, beta) -> np.ndarray:
-        neighbor_indices = self.cell_neighbors
-        means, vars = self.cls_para[1 - new_labels].T
-        new_means, new_vars = self.cls_para[new_labels].T
-        sqrt_2_pi_vars = np.sqrt(2 * np.pi * vars)
+        """
+        Calculate the energy difference between the current and proposed labels.
+        """
+        current_labels = self.labels[indices]  # Get current labels for these indices
+
+        # Get parameters for current and new labels
+        current_means = self.cls_para[current_labels, 0]
+        current_vars = self.cls_para[current_labels, 1]
+        new_means = self.cls_para[new_labels, 0]
+        new_vars = self.cls_para[new_labels, 1]
+
+        sqrt_2_pi_current_vars = np.sqrt(2 * np.pi * current_vars)
         sqrt_2_pi_new_vars = np.sqrt(2 * np.pi * new_vars)
 
+        # Likelihood energy difference
         delta_energy_consts = (
-            np.log(sqrt_2_pi_new_vars / sqrt_2_pi_vars)
+            np.log(sqrt_2_pi_new_vars / sqrt_2_pi_current_vars)
             + ((self.exp[indices] - new_means) ** 2 / (2 * new_vars))
-            - ((self.exp[indices] - means) ** 2 / (2 * vars))
+            - ((self.exp[indices] - current_means) ** 2 / (2 * current_vars))
         )
 
-        delta_energy_neighbors = (
-            beta
-            * 2
-            * np.sum(
-                self._difference(new_labels, self.labels[neighbor_indices])
-                - self._difference(self.labels[indices], self.labels[neighbor_indices]),
-                axis=0,
-            )
-            / self.kneighbors
-        )
+        # Spatial energy difference
+        neighbor_labels = self.labels[self.cell_neighbors[indices]]  # Shape: (len(indices), kneighbors)
+
+        # Calculate neighbor interaction differences
+        current_neighbor_diff = np.sum(current_labels[:, np.newaxis] != neighbor_labels, axis=1)
+        new_neighbor_diff = np.sum(new_labels[:, np.newaxis] != neighbor_labels, axis=1)
+
+        delta_energy_neighbors = beta * 2 * (new_neighbor_diff - current_neighbor_diff) / self.kneighbors
 
         return delta_energy_consts + delta_energy_neighbors
+
+    # def _delta_energies(self, indices, new_labels, beta) -> np.ndarray:
+    #     """
+    #     Calculate the energy difference between the current and proposed labels.
+
+    #     Parameters:
+    #         indices (np.ndarray): Indices of the cells to be updated.
+    #         new_labels (np.ndarray): New labels for the cells.
+    #         beta (float): Parameter for the energy calculation.
+
+    #     Returns:
+    #         np.ndarray: Energy difference between the current and proposed labels.
+    #     """
+    #     neighbor_indices = self.cell_neighbors
+    #     means, vars = self.cls_para[1 - new_labels].T
+    #     new_means, new_vars = self.cls_para[new_labels].T
+    #     sqrt_2_pi_vars = np.sqrt(2 * np.pi * vars)
+    #     sqrt_2_pi_new_vars = np.sqrt(2 * np.pi * new_vars)
+
+    #     delta_energy_consts = (
+    #         np.log(sqrt_2_pi_new_vars / sqrt_2_pi_vars)
+    #         + ((self.exp[indices] - new_means) ** 2 / (2 * new_vars))
+    #         - ((self.exp[indices] - means) ** 2 / (2 * vars))
+    #     )
+
+    #     delta_energy_neighbors = (
+    #         beta
+    #         * 2
+    #         * np.sum(
+    #             self._difference(new_labels, self.labels[neighbor_indices])
+    #             - self._difference(self.labels[indices], self.labels[neighbor_indices]),
+    #             axis=0,
+    #         )
+    #         / self.kneighbors
+    #     )
+    #     if self.verbose:
+    #         print(
+    #             f"delta_energy_neighbors: {np.min(delta_energy_neighbors)} \ndelta_energy_consts: {np.min(delta_energy_consts)}"
+    #         )
+    #     return delta_energy_consts + delta_energy_neighbors
 
     def _neighbor_init(self, alpha, n_comp=15) -> csr_matrix:
         """
@@ -213,9 +251,7 @@ class SimilarityGraph:
         graph_coo = self.graph.tocoo()
         row_indices = graph_coo.row
         col_indices = graph_coo.col
-        correlations = np.exp(
-            (pca_normalized[row_indices] * pca_normalized[col_indices]).sum(axis=1)
-        )
+        correlations = np.exp((pca_normalized[row_indices] * pca_normalized[col_indices]).sum(axis=1))
         neighbor_corr = csr_matrix(
             (correlations, (row_indices, col_indices)),
             shape=(self.cell_num, self.cell_num),
@@ -230,7 +266,7 @@ class SimilarityGraph:
 
     def _update_adj_matrix(self, theta: float) -> None:
         """
-        Efficiently update the adjacency matrix based on the labels.
+        Update the adjacency matrix based on the labels.
 
         Parameters:
         ----------
@@ -248,9 +284,7 @@ class SimilarityGraph:
         new_data[diff_label] *= theta
 
         self.adj_matrix = self._csr_normalize(
-            csr_matrix(
-                (new_data, (row_indices, col_indices)), shape=self.neighbor_corr.shape
-            )
+            csr_matrix((new_data, (row_indices, col_indices)), shape=self.neighbor_corr.shape)
         )
 
     @staticmethod

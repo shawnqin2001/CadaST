@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cadaST"
-version = "0.0.4"
+version = "0.0.5"
 authors = [
   { name="Xianhan Qin", email="q764579066@gmail.com" },
 ]
@@ -20,12 +20,19 @@ dependencies = [
     "anndata>=0.10.9",
     "numpy>=1.23.5",
     "scikit-learn>=1.5.2",
-    "scipy>=1.13.1",
+    "scipy>=1.13.0",
     "tqdm>=4.66.5",
 ]
+
 
 [project.urls]
 Homepage = "https://github.com/Khadaq2001/cadaST"
 Issues = "https://github.com/Khadaq2001/cadaST/issues"
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
 
+[tool.ruff]
+line-length = 120

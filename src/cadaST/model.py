@@ -2,6 +2,7 @@ import numpy as np
 from anndata import AnnData
 from joblib import Parallel, delayed
 from tqdm import tqdm
+
 from .graph import SimilarityGraph
 from .utils import feature_ranking, lap_score
 
@@ -22,6 +23,7 @@ class CadaST:
         init_alpha: float = 6,
         icm_iter: int = 1,
         max_iter: int = 3,
+        n_components: int = 2,
         n_top: int | None = None,
         n_jobs: int = 16,
         verbose: bool = True,
@@ -34,11 +36,12 @@ class CadaST:
         self.init_alpha = init_alpha
         self.max_iter = max_iter
         self.icm_iter = icm_iter
-        self.gene_list = self.adata.var_names
+        self.n_components = n_components
         self.n_top = n_top
         self.n_jobs = n_jobs
-        self.graph = None
         self.verbose = verbose
+        self.gene_list = self.adata.var_names
+        self.graph = None
 
     def construct_graph(self) -> None:
         """
@@ -53,6 +56,7 @@ class CadaST:
             init_alpha=self.init_alpha,
             icm_iter=self.icm_iter,
             max_iter=self.max_iter,
+            n_components=self.n_components,
             verbose=self.verbose,
         )
         self.graph = graph
@@ -67,20 +71,20 @@ class CadaST:
         if (n_top is not None) and (n_top < len(self.gene_list)):
             if self.verbose:
                 print(f"Filtering genes with top {n_top} SVG features")
-            lapScore = lap_score(self.adata.X, self.graph.neighbor_corr) # type: ignore
+            lapScore = lap_score(self.adata.X, self.graph.neighbor_corr)  # type: ignore
             feature_rank = feature_ranking(lapScore)
             self.gene_list = self.gene_list[feature_rank[:n_top]]
-            self.adata = self.adata[:, self.gene_list] # type: ignore
+            self.adata = self.adata[:, self.gene_list]  # type: ignore
 
     def fit(self) -> AnnData:
         """
-        Fit the cadaST model
+        Fit the CadaST model
         """
         if self.graph is None:
             self.construct_graph()
         if (self.n_top is not None) and (self.n_top < len(self.gene_list)):
             self.filter_genes()
-        print("Start cadaST model fitting")
+        print("Start CadaST model fitting")
         results = Parallel(n_jobs=self.n_jobs)(
             delayed(self._process_gene)(
                 self.graph,
