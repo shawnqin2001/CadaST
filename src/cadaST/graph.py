@@ -195,45 +195,6 @@ class SimilarityGraph:
 
         return delta_energy_consts + delta_energy_neighbors
 
-    # def _delta_energies(self, indices, new_labels, beta) -> np.ndarray:
-    #     """
-    #     Calculate the energy difference between the current and proposed labels.
-
-    #     Parameters:
-    #         indices (np.ndarray): Indices of the cells to be updated.
-    #         new_labels (np.ndarray): New labels for the cells.
-    #         beta (float): Parameter for the energy calculation.
-
-    #     Returns:
-    #         np.ndarray: Energy difference between the current and proposed labels.
-    #     """
-    #     neighbor_indices = self.cell_neighbors
-    #     means, vars = self.cls_para[1 - new_labels].T
-    #     new_means, new_vars = self.cls_para[new_labels].T
-    #     sqrt_2_pi_vars = np.sqrt(2 * np.pi * vars)
-    #     sqrt_2_pi_new_vars = np.sqrt(2 * np.pi * new_vars)
-
-    #     delta_energy_consts = (
-    #         np.log(sqrt_2_pi_new_vars / sqrt_2_pi_vars)
-    #         + ((self.exp[indices] - new_means) ** 2 / (2 * new_vars))
-    #         - ((self.exp[indices] - means) ** 2 / (2 * vars))
-    #     )
-
-    #     delta_energy_neighbors = (
-    #         beta
-    #         * 2
-    #         * np.sum(
-    #             self._difference(new_labels, self.labels[neighbor_indices])
-    #             - self._difference(self.labels[indices], self.labels[neighbor_indices]),
-    #             axis=0,
-    #         )
-    #         / self.kneighbors
-    #     )
-    #     if self.verbose:
-    #         print(
-    #             f"delta_energy_neighbors: {np.min(delta_energy_neighbors)} \ndelta_energy_consts: {np.min(delta_energy_consts)}"
-    #         )
-    #     return delta_energy_consts + delta_energy_neighbors
 
     def _neighbor_init(self, alpha, n_comp=15) -> csr_matrix:
         """

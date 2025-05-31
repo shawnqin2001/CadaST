@@ -26,8 +26,8 @@ dependencies = [
 
 
 [project.urls]
-Homepage = "https://github.com/Khadaq2001/cadaST"
-Issues = "https://github.com/Khadaq2001/cadaST/issues"
+Homepage = "https://github.com/Khadaq2001/CadaST"
+Issues = "https://github.com/Khadaq2001/CadaST/issues"
 
 [tool.pyright]
 venvPath = "."

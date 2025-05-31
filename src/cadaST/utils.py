@@ -1,8 +1,19 @@
 import numpy as np
 import scanpy as sc
+import seaborn as sns 
 from scipy.sparse import csr_matrix
+from matplotlib import rcParams
 
 from .graph import SimilarityGraph
+
+
+def init_plot_params():
+    rcParams["font.family"] = "Arial"
+    rcParams["font.weight"] = "medium"
+    rcParams["pdf.fonttype"] = 42
+    rcParams["ps.fonttype"] = 42
+    sns.set_theme(style="white", font="Arial")
+    sc.set_figure_params(vector_friendly=True, dpi=96, dpi_save=300)
 
 
 def mclust_R(
@@ -17,13 +28,13 @@ def mclust_R(
     Clustering using the mclust algorithm.
     The parameters are the same as those in the R package mclust.
     """
+    import rpy2.robjects.numpy2ri
+    import rpy2.robjects as robjects
 
     np.random.seed(random_seed)
-    import rpy2.robjects as robjects
 
     robjects.r.library("mclust")
 
-    import rpy2.robjects.numpy2ri
 
     rpy2.robjects.numpy2ri.activate()
     r_random_seed = robjects.r["set.seed"]
@@ -127,8 +138,7 @@ def refine_label(adata, radius=25, key="mclust"):
 
     # calculate distance
     position = adata.obsm["spatial"]
-    distance = ot.dist(position, position, metric="euclidean")
-
+    distance = np.linalg.norm(position[:, np.newaxis] - position[np.newaxis, :], axis=2)
     n_cell = distance.shape[0]
 
     for i in range(n_cell):
