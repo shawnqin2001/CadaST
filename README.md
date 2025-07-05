@@ -2,8 +2,9 @@
 
 ## Discription
 
-This project is a python implementation of **cadaST**, a spatial transcriptomics data denoising and augmenting method based on similarity graph. The method is proposed in the paper **Similarity-Graph Based Spatial Context-Aware Denoising and Augmenting in Spatial Transcriptomics**.
+This project is a python implementation of **CadaST**, a spatial omics data denoising and augmenting method based on similarity graph. The method is proposed in the paper **Similarity-Graph Based Spatial Context-Aware Denoising and Augmenting in Spatial Transcriptomics**.
 The method is implemented in the class `CadaST` in `model.py`.
+
 
 ## Installation
 Use pip to install the package in your python environment.
@@ -28,7 +29,8 @@ To get detailed tutorial, please refer to the [tutorial](tutorial).
 - beta $\beta$: The scaling weight for the similarity graph.
 - alpha $\alpha$: The scaling weight for correlation matrix.
 - theta $\theta$: The decay value for non-matching labels in the label matrix.
-- NPROCESS: The number of processes used for parallel computing.
+- n_jobs: The number of processes used for parallel computing.
+- kneighbors: The k-Nearest Neighbors to construct graph.
 
 ## Contributing
 

@@ -5,9 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cadaST"
 version = "0.0.5"
-authors = [
-  { name="Xianhan Qin", email="q764579066@gmail.com" },
-]
+authors = [{ name = "Xianhan Qin", email = "q764579066@gmail.com" }]
 description = "A python implement of cadaST"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,10 +27,7 @@ dependencies = [
 Homepage = "https://github.com/Khadaq2001/CadaST"
 Issues = "https://github.com/Khadaq2001/CadaST/issues"
 
-[tool.pyright]
-venvPath = "."
-venv = ".venv"
-typeCheckingMode = "basic"
-
+[tool.pyrefly]
+python-interpreter = "/Users/qinxianhan/Seafile/Code/project/CadaST/.venv/bin/python3"
 [tool.ruff]
 line-length = 120

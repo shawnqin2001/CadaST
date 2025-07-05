@@ -2,9 +2,11 @@
 *.csv
 output/
 dataset/
-.vscode/
-figures/
+notebooks/
 notebook/
+scripts/
+figures/
+.vscode/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
