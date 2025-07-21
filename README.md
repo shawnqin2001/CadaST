@@ -2,7 +2,8 @@
 
 ## Description
 
-![CadaST](./imgs/schematic.pdf)
+![CadaST](./imgs/schematic.jpg)
+
 This project is a python implementation of **CadaST**, a spatial omics data denoising and augmenting method based on similarity graph. The method is proposed in the paper **Probabilistic-Graph Based Spatial Context-Aware Denoising and Augmenting in Spatial Omics**.
 The method is implemented in the class `CadaST` in `model.py`.
 
