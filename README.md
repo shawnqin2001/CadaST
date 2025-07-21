@@ -1,16 +1,17 @@
-# Similarity-Graph Based Spatial Context-Aware Denoising and Augmenting in Spatial Transcriptomics
+# Probabilistic-Graph Based Spatial Context-Aware Framework for Interpretable Spatial Omics Denoising and Augmentation
 
-## Discription
+## Description
 
-This project is a python implementation of **CadaST**, a spatial omics data denoising and augmenting method based on similarity graph. The method is proposed in the paper **Similarity-Graph Based Spatial Context-Aware Denoising and Augmenting in Spatial Transcriptomics**.
+![CadaST](./imgs/schematic.pdf)
+This project is a python implementation of **CadaST**, a spatial omics data denoising and augmenting method based on similarity graph. The method is proposed in the paper **Probabilistic-Graph Based Spatial Context-Aware Denoising and Augmenting in Spatial Omics**.
 The method is implemented in the class `CadaST` in `model.py`.
 
 
 ## Installation
-Use pip to install the package in your python environment.
 
+Use pip to install the package in your python environment.
 ```bash
-conda create -n cadaST python=3.10
+conda create -n cadaST python=3.9
 conda activate cadaST
 pip install cadaST
 ```
@@ -35,7 +36,7 @@ To get detailed tutorial, please refer to the [tutorial](tutorial).
 ## Contributing
 
 Contribution is welcomed! Here’s how you can help:
-- Report bugs or suggest features using [GitHub Issues](https://github.com/Khadaq2001/cadaST/issues).
+- Report bugs or suggest features using [GitHub Issues](https://github.com/Khadaq2001/CadaST/issues).
 - Fork the repository and create a new branch for your feature or bugfix.
 - Submit a pull request and ensure that all tests pass.
 
