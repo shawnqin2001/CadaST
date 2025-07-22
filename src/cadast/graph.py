@@ -5,7 +5,6 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
-
 class SimilarityGraph:
     """
     Construct Similarity graph and implement HMRF in spatial transcriptomics
@@ -194,7 +193,6 @@ class SimilarityGraph:
         delta_energy_neighbors = beta * 2 * (new_neighbor_diff - current_neighbor_diff) / self.kneighbors
 
         return delta_energy_consts + delta_energy_neighbors
-
 
     def _neighbor_init(self, alpha, n_comp=15) -> csr_matrix:
         """
