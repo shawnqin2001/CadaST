@@ -28,7 +28,7 @@ class CadaST:
         n_jobs: int = 16,
         verbose: bool = True,
     ):
-        self.adata = adata.copy()
+        self.adata = adata
         self.kneighbors = kneighbors
         self.beta = beta
         self.alpha = alpha
@@ -68,13 +68,14 @@ class CadaST:
         if self.graph is None:
             self.construct_graph()
         n_top = n_top if self.n_top is None else self.n_top
-        if (n_top is not None) and (n_top < len(self.gene_list)):
+        if n_top is not None:
             if self.verbose:
                 print(f"Filtering genes with top {n_top} SVG features")
-            lapScore = lap_score(self.adata.X, self.graph.neighbor_corr)  # type: ignore
-            feature_rank = feature_ranking(lapScore)
-            self.gene_list = self.gene_list[feature_rank[:n_top]]
-            self.adata = self.adata[:, self.gene_list]  # type: ignore
+            self.lapScore = lap_score(self.adata.X, self.graph.neighbor_corr)  # type: ignore
+            self.feature_rank = feature_ranking(self.lapScore)
+            self.feature_selected = self.feature_rank[:n_top]
+            self.gene_list = self.gene_list[self.feature_selected]
+            self.adata = self.adata[:, self.gene_list].copy()  # type: ignore
 
     def fit(self) -> AnnData:
         """
@@ -82,24 +83,43 @@ class CadaST:
         """
         if self.graph is None:
             self.construct_graph()
-        if (self.n_top is not None) and (self.n_top < len(self.gene_list)):
+        if self.n_top is not None:
+            self.feature_selected = np.arange(self.adata.shape[1])
             self.filter_genes()
         print("Start CadaST model fitting")
+        n_cells = self.adata.n_obs
+        n_genes = len(self.feature_selected)
+        imputed_exp = np.empty((n_cells, n_genes), dtype=np.float32)
+        labels = np.empty((n_cells, n_genes), dtype=np.int8)
+        if self.n_jobs == 1:
+            imputed_exp, labels = [], []
+            for feature_idx in tqdm(self.feature_selected):
+                self.graph.fit(
+                    gene_idx=feature_idx,
+                )
+                imputed_exp.append(self.graph.exp)
+                labels.append(self.graph.labels)
+            self.adata.X = np.array(imputed_exp).T
+            self.adata.layers["labels"] = np.array(labels).T
+            return self.adata
         results = Parallel(n_jobs=self.n_jobs)(
             delayed(self._process_gene)(
+                col,
                 self.graph,
-                gene,
+                feature_idx,
             )
-            for gene in tqdm(self.gene_list)
+            for col, feature_idx in enumerate(tqdm(self.feature_selected))
         )
-        imputed_exp, labels = zip(*results)
-        self.adata.X = np.array(imputed_exp).T
-        self.adata.layers["labels"] = np.array(labels).T
+        for col, exp_vec, lab_vec in results:
+            imputed_exp[:, col] = exp_vec.astype(np.float32, copy=False)
+            labels[:, col] = lab_vec
+        self.adata.X = imputed_exp
+        self.adata.layers["labels"] = labels
         return self.adata
 
     @staticmethod
-    def _process_gene(model, gene) -> tuple:
+    def _process_gene(col_idx, model, feature_idx) -> tuple:
         model.fit(
-            gene_id=gene,
+            gene_idx=feature_idx,
         )
-        return model.exp, model.labels
+        return col_idx, model.exp, model.labels

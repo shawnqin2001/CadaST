@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cadast"
-version = "0.0.5"
+version = "0.0.6"
 authors = [{ name = "Xianhan Qin", email = "q764579066@gmail.com" }]
 description = "A python implement of CadaST"
 readme = "README.md"

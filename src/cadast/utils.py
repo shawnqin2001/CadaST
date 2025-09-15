@@ -1,6 +1,6 @@
 import numpy as np
 import scanpy as sc
-import seaborn as sns 
+import seaborn as sns
 from scipy.sparse import csr_matrix
 from matplotlib import rcParams
 
@@ -35,7 +35,6 @@ def mclust_R(
 
     robjects.r.library("mclust")
 
-
     rpy2.robjects.numpy2ri.activate()
     r_random_seed = robjects.r["set.seed"]
     r_random_seed(random_seed)
@@ -67,31 +66,46 @@ def mclust_R(
     return adata
 
 
-def lap_score(X, W):
+def lap_score(X, W, block_size: int = 512):
     """
-    Parameters:
-    X: Feature matrix, shape (n_samples, n_features)
-    W: Affinity matrix, shape (n_samples, n_samples)
+    Memory-efficient Laplacian score.
+    X: (n_samples x n_features) dense or sparse
+    W: sparse affinity matrix (n_samples x n_samples)
+    Computes in blocks to avoid holding (W @ X) for all genes at once.
     """
-    if not isinstance(X, np.ndarray):
-        X = X.toarray()
+    from scipy.sparse import issparse, csr_matrix
 
-    D = W.sum(axis=1).A1
+    if not isinstance(W, csr_matrix):
+        W = csr_matrix(W)
+    n_samples = W.shape[0]
+
+    if issparse(X):
+        X_csr = X.tocsr()
+    else:
+        X_csr = csr_matrix(np.asarray(X, dtype=np.float32))
+
+    D = np.asarray(W.sum(axis=1)).ravel().astype(np.float32)
     D_sum = D.sum()
+    # Precompute sum_i D_i X_{i,j} and sum_i D_i X_{i,j}^2
+    # sum_D_X = X^T D
+    sum_D_X = (X_csr.T).dot(D)  # (n_features,)
+    sum_D_X2 = (X_csr.power(2).T).dot(D)
 
-    tmp = D @ X
-
-    t1 = X * D[:, np.newaxis]
-
-    t2 = W @ X
-
-    D_prime = np.einsum("ij,ij->j", t1, X) - (tmp * tmp) / D_sum
-    L_prime = np.einsum("ij,ij->j", t2, X) - (tmp * tmp) / D_sum
-
+    D_prime = sum_D_X2 - (sum_D_X**2) / D_sum
     D_prime = np.maximum(D_prime, 1e-12)
 
-    score = 1 - (L_prime / D_prime)
+    n_features = X_csr.shape[1]
+    L_prime = np.empty(n_features, dtype=np.float32)
 
+    for start in range(0, n_features, block_size):
+        end = min(start + block_size, n_features)
+        X_block = X_csr[:, start:end]
+        WX_block = W.dot(X_block)
+        # sum_i WX_ij * X_ij -> element-wise multiply then sum rows
+        prod = WX_block.multiply(X_block)
+        L_prime[start:end] = np.asarray(prod.sum(axis=0)).ravel() - (sum_D_X[start:end] ** 2) / D_sum
+
+    score = 1.0 - (L_prime / D_prime)
     return score
 
 

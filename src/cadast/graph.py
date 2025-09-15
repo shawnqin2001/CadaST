@@ -1,9 +1,9 @@
 import numpy as np
-from scipy.sparse import csr_matrix
-from sklearn.decomposition import PCA
+from scipy.sparse import csr_matrix, isspmatrix_csr
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
-from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import TruncatedSVD
+
 
 class SimilarityGraph:
     """
@@ -23,12 +23,20 @@ class SimilarityGraph:
         n_components: int = 2,
         convergency_threshold: float = 1e-5,
         verbose: bool = False,
+        memory_efficient: bool = True,
     ) -> None:
         self.verbose = verbose
-        self.matrix = adata.to_df()
+        # Keep original matrix (sparse or dense) but enforce float32 without densifying
+        X = adata.X
+        if hasattr(X, "astype"):
+            self.matrix = X.astype(np.float32)
+        else:
+            self.matrix = np.asarray(X, dtype=np.float32)
         self.cell_num = adata.shape[0]
         self.kneighbors = kneighbors + 1
-        self.graph = self._construct_graph(adata.obsm["spatial"], self.kneighbors)
+        self.memory_efficient = memory_efficient
+        # Get KNN indices once (avoid building large intermediate if memory_efficient)
+        self._build_knn(adata.obsm["spatial"], self.kneighbors)
         self.beta = beta
         self.alpha = alpha
         self.theta = theta
@@ -37,18 +45,109 @@ class SimilarityGraph:
         self.max_iter = max_iter
         self.n_components = n_components
         self.convergency_threshold = convergency_threshold
+        # Build a lightweight adjacency (csr) from indices (no distances needed for correlation)
+        self.graph = self._knn_indices_to_csr(self.cell_neighbors, self.cell_num)
         self.neighbor_corr = self._neighbor_init(self.alpha)
         if self.verbose:
             print(f"Initialized model with beta: {self.beta}, alpha: {alpha}, theta: {self.theta}")
 
-    def fit(
-        self,
-        gene_id: str,
-    ) -> None:
+    def _build_knn(self, coord: np.ndarray, kneighbors: int):
+        if self.verbose:
+            print("Constructing KNN")
+        nbrs = NearestNeighbors(n_neighbors=kneighbors, algorithm="auto")
+        nbrs.fit(coord)
+        distances, indices = nbrs.kneighbors(coord, return_distance=True)
+        self.cell_neighbors = indices.astype(np.int32)
+        self.neighbor_distances = distances.astype(np.float32)
+
+    @staticmethod
+    def _knn_indices_to_csr(indices: np.ndarray, n_cells: int) -> csr_matrix:
+        # Directed KNN graph
+        rows = np.repeat(np.arange(n_cells, dtype=np.int32), indices.shape[1])
+        cols = indices.ravel()
+        data = np.ones_like(cols, dtype=np.float32)
+        return csr_matrix((data, (rows, cols)), shape=(n_cells, n_cells))
+
+    def _neighbor_init(self, alpha, n_comp=15) -> csr_matrix:
+        """
+        Initialize neighbor correlation matrix
+        """
+        if self.verbose:
+            print("Initializing neighbor correlation matrix ")
+
+        X = self.matrix
+        if isspmatrix_csr(X):
+            svd = TruncatedSVD(n_components=min(n_comp, X.shape[1] - 1))
+            comps = svd.fit_transform(X)
+        else:
+            svd = TruncatedSVD(n_components=min(n_comp, X.shape[1] - 1))
+            comps = svd.fit_transform(X)
+
+        comps = comps.astype(np.float32, copy=False)
+
+        comps -= comps.mean(axis=1, keepdims=True)
+        row_norms = np.linalg.norm(comps, axis=1)
+        row_norms[row_norms == 0] = 1e-5
+        comps /= row_norms[:, None]
+
+        idx = self.cell_neighbors
+        n_cells, k = idx.shape
+        rows = np.repeat(np.arange(n_cells, dtype=np.int32), k)
+        cols = idx.ravel()
+        block = 4096
+        sims = np.empty(rows.shape[0], dtype=np.float32)
+        write_ptr = 0
+        for start in range(0, n_cells, block):
+            end = min(start + block, n_cells)
+            block_idx = idx[start:end]
+            base = comps[start:end]
+            dots = (base[:, None, :] * comps[block_idx]).sum(axis=2)
+            bsz = (end - start) * k
+            sims[write_ptr : write_ptr + bsz] = np.exp(dots.ravel())
+            write_ptr += bsz
+
+        neighbor_corr = csr_matrix((sims, (rows, cols)), shape=(n_cells, n_cells), dtype=np.float32)
+        neighbor_corr.setdiag(0)
+        self._csr_row_normalize_inplace(neighbor_corr)
+        neighbor_corr.data *= alpha
+        neighbor_corr.setdiag(1.0)
+        self._csr_row_normalize_inplace(neighbor_corr)
+        return neighbor_corr
+
+    def _update_adj_matrix(self, theta: float) -> None:
+        """
+        Scale edges whose labels differ by theta (in-place friendly).
+        """
+        nc = self.neighbor_corr
+        coo = nc.tocoo()
+        row = coo.row
+        col = coo.col
+        data = coo.data.copy()
+        diff = self.labels[row] != self.labels[col]
+        data[diff] *= theta
+        adj = csr_matrix((data, (row, col)), shape=nc.shape)
+        self._csr_row_normalize_inplace(adj)
+        self.adj_matrix = adj
+
+    @staticmethod
+    def _csr_row_normalize_inplace(mat: csr_matrix):
+        """
+        In-place row normalization (avoids allocating new large arrays).
+        """
+        row_sums = np.array(mat.sum(axis=1)).ravel()
+        row_sums[row_sums == 0] = 1.0
+        inv = (1.0 / row_sums).astype(mat.data.dtype)
+
+        row_idx = np.repeat(np.arange(mat.shape[0], dtype=np.int32), np.diff(mat.indptr))
+        mat.data *= inv[row_idx]
+        return mat
+
+    def fit(self, gene_idx: int) -> None:
         """
         Implement HMRF using ICM-EM
         """
-        self.exp = self.matrix[gene_id].values
+        self.exp = self.matrix[:, gene_idx]
+        self.exp = self.exp.toarray().ravel() if hasattr(self.exp, "toarray") else self.exp
         self._initialize_labels()
         self._update_adj_matrix(self.theta)
         self._run_icmem()
@@ -73,16 +172,6 @@ class SimilarityGraph:
         Impute the expression by considering neighbor cells
         """
         return self.adj_matrix.dot(self.exp)
-
-    def _construct_graph(self, coord: np.ndarray, kneighbors: int = 18) -> csr_matrix:
-        """
-        Construct gene graph based on the nearest neighbors
-        """
-        if self.verbose:
-            print("Constructing Graph")
-        graph = NearestNeighbors(n_neighbors=kneighbors).fit(coord).kneighbors_graph(coord)
-        self.cell_neighbors = graph.indices.reshape(self.cell_num, kneighbors)  # type: ignore
-        return graph  # type: ignore
 
     def _label_resort(self) -> None:
         """
@@ -184,7 +273,7 @@ class SimilarityGraph:
         )
 
         # Spatial energy difference
-        neighbor_labels = self.labels[self.cell_neighbors[indices]]  # Shape: (len(indices), kneighbors)
+        neighbor_labels = self.labels[self.cell_neighbors[indices]] 
 
         # Calculate neighbor interaction differences
         current_neighbor_diff = np.sum(current_labels[:, np.newaxis] != neighbor_labels, axis=1)
@@ -193,68 +282,6 @@ class SimilarityGraph:
         delta_energy_neighbors = beta * 2 * (new_neighbor_diff - current_neighbor_diff) / self.kneighbors
 
         return delta_energy_consts + delta_energy_neighbors
-
-    def _neighbor_init(self, alpha, n_comp=15) -> csr_matrix:
-        """
-        Initialize the neighboring correlation matrix
-        """
-
-        if self.verbose:
-            print("Initializing neighbor correlation matrix")
-        pca = PCA(n_comp).fit_transform(StandardScaler().fit_transform(self.matrix))
-        pca_centered = pca - np.mean(pca, axis=1, keepdims=True)
-        norms = np.linalg.norm(pca_centered, axis=1)
-        norms[norms == 0] = 1e-5
-        pca_normalized = pca_centered / norms[:, np.newaxis]
-        # Get graph edges
-        graph_coo = self.graph.tocoo()
-        row_indices = graph_coo.row
-        col_indices = graph_coo.col
-        correlations = np.exp((pca_normalized[row_indices] * pca_normalized[col_indices]).sum(axis=1))
-        neighbor_corr = csr_matrix(
-            (correlations, (row_indices, col_indices)),
-            shape=(self.cell_num, self.cell_num),
-        )
-        neighbor_corr.setdiag(0)
-        neighbor_corr = self._csr_normalize(neighbor_corr)
-        neighbor_corr = neighbor_corr.multiply(alpha)
-        neighbor_corr.setdiag(1)
-        neighbor_corr = self._csr_normalize(neighbor_corr)
-
-        return neighbor_corr
-
-    def _update_adj_matrix(self, theta: float) -> None:
-        """
-        Update the adjacency matrix based on the labels.
-
-        Parameters:
-        ----------
-        theta : float
-            Scaling factor for off-diagonal entries where labels do not match.
-        """
-
-        neighbor_corr_coo = self.neighbor_corr.tocoo()
-        row_indices = neighbor_corr_coo.row
-        col_indices = neighbor_corr_coo.col
-        data = neighbor_corr_coo.data
-
-        diff_label = self.labels[row_indices] != self.labels[col_indices]
-        new_data = data.copy()
-        new_data[diff_label] *= theta
-
-        self.adj_matrix = self._csr_normalize(
-            csr_matrix((new_data, (row_indices, col_indices)), shape=self.neighbor_corr.shape)
-        )
-
-    @staticmethod
-    def _csr_normalize(mat) -> csr_matrix:
-        """
-        Normalize the csr matrix
-        """
-        row_sums = np.array(mat.sum(axis=1)).flatten()
-        inv_rs = 1.0 / row_sums
-        mat = mat.multiply(inv_rs[:, np.newaxis])
-        return mat
 
     @staticmethod
     def _difference(x, y):
