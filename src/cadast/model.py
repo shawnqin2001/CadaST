@@ -16,19 +16,20 @@ class CadaST:
     def __init__(
         self,
         adata: AnnData,
-        kneighbors: int,
+        kneighbors: int = 16,
         beta: int = 10,
         alpha: float = 0.6,
         theta: float = 0.2,
         init_alpha: float = 6,
-        icm_iter: int = 1,
+        icm_iter: int = 2,
         max_iter: int = 3,
         n_components: int = 2,
         n_top: int | None = None,
         n_jobs: int = 16,
+        seed: int = 2025,
         verbose: bool = True,
     ):
-        self.adata = adata
+        self.adata = adata.copy()
         self.kneighbors = kneighbors
         self.beta = beta
         self.alpha = alpha
@@ -41,6 +42,7 @@ class CadaST:
         self.n_jobs = n_jobs
         self.verbose = verbose
         self.gene_list = self.adata.var_names
+        self.seed = seed
         self.graph = None
 
     def construct_graph(self) -> None:
@@ -58,6 +60,7 @@ class CadaST:
             max_iter=self.max_iter,
             n_components=self.n_components,
             verbose=self.verbose,
+            seed=self.seed,
         )
         self.graph = graph
 

@@ -168,7 +168,7 @@ def refine_label(adata, radius=25, key="mclust"):
     return new_type
 
 
-def clustering(adata, n_clusters, method="mclust", refine=False, dims=18, radius=25):
+def clustering(adata, n_clusters, method="mclust", refine=False, dims=18, radius=25, seed=2025):
     """
     Clustering adata using the mclust algorithm
     """
@@ -176,7 +176,7 @@ def clustering(adata, n_clusters, method="mclust", refine=False, dims=18, radius
     sc.tl.pca(adata, n_comps=dims)
     if method == "mclust":
         print("Clustering using mclust")
-        adata = mclust_R(adata, used_obsm="X_pca", num_cluster=n_clusters)
+        adata = mclust_R(adata, used_obsm="X_pca", num_cluster=n_clusters, random_seed=seed)
         adata.obs["domain"] = adata.obs["mclust"]
     if method == "leiden":
         print("Clustering using leiden")

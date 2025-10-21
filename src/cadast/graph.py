@@ -22,11 +22,14 @@ class SimilarityGraph:
         max_iter: int = 3,
         n_components: int = 2,
         convergency_threshold: float = 1e-5,
+        seed: int = 2025,
         verbose: bool = False,
         memory_efficient: bool = True,
     ) -> None:
         self.verbose = verbose
-        # Keep original matrix (sparse or dense) but enforce float32 without densifying
+        # Remove global seeding; keep a local seed
+        self.seed = int(seed)
+        self.rng = np.random.default_rng(self.seed)
         X = adata.X
         if hasattr(X, "astype"):
             self.matrix = X.astype(np.float32)
@@ -35,7 +38,6 @@ class SimilarityGraph:
         self.cell_num = adata.shape[0]
         self.kneighbors = kneighbors + 1
         self.memory_efficient = memory_efficient
-        # Get KNN indices once (avoid building large intermediate if memory_efficient)
         self._build_knn(adata.obsm["spatial"], self.kneighbors)
         self.beta = beta
         self.alpha = alpha
@@ -45,7 +47,6 @@ class SimilarityGraph:
         self.max_iter = max_iter
         self.n_components = n_components
         self.convergency_threshold = convergency_threshold
-        # Build a lightweight adjacency (csr) from indices (no distances needed for correlation)
         self.graph = self._knn_indices_to_csr(self.cell_neighbors, self.cell_num)
         self.neighbor_corr = self._neighbor_init(self.alpha)
         if self.verbose:
@@ -76,12 +77,12 @@ class SimilarityGraph:
             print("Initializing neighbor correlation matrix ")
 
         X = self.matrix
-        if isspmatrix_csr(X):
-            svd = TruncatedSVD(n_components=min(n_comp, X.shape[1] - 1))
-            comps = svd.fit_transform(X)
-        else:
-            svd = TruncatedSVD(n_components=min(n_comp, X.shape[1] - 1))
-            comps = svd.fit_transform(X)
+        # Make SVD deterministic
+        svd = TruncatedSVD(
+            n_components=min(n_comp, X.shape[1] - 1),
+            random_state=self.seed,
+        )
+        comps = svd.fit_transform(X)
 
         comps = comps.astype(np.float32, copy=False)
 
@@ -146,6 +147,9 @@ class SimilarityGraph:
         """
         Implement HMRF using ICM-EM
         """
+        # Per-gene deterministic RNG, works the same in parallel or sequential
+        self.rng = np.random.default_rng(self.seed + int(gene_idx))
+
         self.exp = self.matrix[:, gene_idx]
         self.exp = self.exp.toarray().ravel() if hasattr(self.exp, "toarray") else self.exp
         self._initialize_labels()
@@ -160,7 +164,7 @@ class SimilarityGraph:
         neighbor_corr = neighbor_corr / self.alpha * self.init_alpha
         neighbor_corr.setdiag(1)
         smoothed_exp = neighbor_corr.dot(self.exp)
-        gmm = GaussianMixture(n_components=self.n_components).fit(smoothed_exp.reshape(-1, 1))
+        gmm = GaussianMixture(n_components=self.n_components, random_state=self.seed).fit(smoothed_exp.reshape(-1, 1))
         means, covs = gmm.means_.ravel(), gmm.covariances_.ravel()  # type: ignore
         self.cls_para = np.column_stack((means, covs))
         self.labels = gmm.predict(smoothed_exp.reshape(-1, 1))
@@ -204,17 +208,18 @@ class SimilarityGraph:
             changed = 0
             for _ in range(icm_iter):
                 indices = np.arange(cell_num)
-                new_labels = np.random.randint(0, self.n_components, size=cell_num)
+                # Use local RNG, not global
+                new_labels = self.rng.integers(0, self.n_components, size=cell_num)
                 delta_energies = self._delta_energies(indices, new_labels, beta)
                 negative_indices = delta_energies < 0
                 self.labels[indices[negative_indices]] = new_labels[negative_indices]
                 changed += np.sum(negative_indices)
 
-                # Metropolis-Hastings
+                # Metropolis-Hastings (keep deterministic via local RNG if enabled)
                 # non_negative_indices = np.logical_not(negative_indices)
                 # probabilities = np.exp(-delta_energies[non_negative_indices] / temp)
                 # probabilities[probabilities == 0] = 1e-5
-                # samples = np.random.uniform(0, 1, size=probabilities.shape)
+                # samples = self.rng.uniform(0, 1, size=probabilities.shape)
                 # update = samples < probabilities
                 # self.labels[indices[non_negative_indices][update]] = new_labels[non_negative_indices][update]
                 # changed += np.sum(update)
@@ -273,7 +278,7 @@ class SimilarityGraph:
         )
 
         # Spatial energy difference
-        neighbor_labels = self.labels[self.cell_neighbors[indices]] 
+        neighbor_labels = self.labels[self.cell_neighbors[indices]]
 
         # Calculate neighbor interaction differences
         current_neighbor_diff = np.sum(current_labels[:, np.newaxis] != neighbor_labels, axis=1)
