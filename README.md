@@ -12,9 +12,9 @@ The method is implemented in the class `CadaST` in `model.py`.
 
 Use pip to install the package in your python environment.
 ```bash
-conda create -n cadaST python=3.9
-conda activate cadaST
-pip install cadaST
+conda create -n CadaST python=3.10
+conda activate CadaST
+pip install cadast
 ```
 
 To enable clustering method 'mclust', you shall install R package 'mclust'
@@ -24,7 +24,7 @@ Rscript -e "install.packages('mclust')"
 ```
 
 ## Usage
-To get detailed tutorial, please refer to the [tutorial](tutorial).
+To get detailed tutorial, please refer to the [tutorial](./tutorial/).
 
 ### Parameters
 
