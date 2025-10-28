@@ -168,23 +168,36 @@ def refine_label(adata, radius=25, key="mclust"):
     return new_type
 
 
-def clustering(adata, n_clusters, method="mclust", refine=False, dims=18, radius=25, seed=2025):
+def clustering(adata, n_clusters, method="mclust", dims=15, dim_search=None, refine=False, radius=25, seed=2025):
     """
     Clustering adata using the mclust algorithm
     """
 
-    sc.tl.pca(adata, n_comps=dims)
     if method == "mclust":
         print("Clustering using mclust")
+        if dim_search is not None:
+            from sklearn.metrics import adjusted_rand_score
+
+            best_ari = -1
+            for dim in range(dim_search[0], dim_search[1]):
+                sc.tl.pca(adata, n_comps=dim)
+                adata = mclust_R(adata, used_obsm="X_pca", num_cluster=n_clusters, random_seed=seed)
+                obs_df = adata.obs.dropna()
+                ari = adjusted_rand_score(obs_df["mclust"], obs_df["truth"])
+                if ari > best_ari:
+                    best_ari = ari
+                    dims = dim
+        sc.tl.pca(adata, n_comps=dims)
         adata = mclust_R(adata, used_obsm="X_pca", num_cluster=n_clusters, random_seed=seed)
         adata.obs["domain"] = adata.obs["mclust"]
-    if method == "leiden":
+    else:
         print("Clustering using leiden")
+        sc.tl.pca(adata, n_comps=dims)
         sc.pp.neighbors(adata)
         sc.tl.leiden(adata, resolution=0.5)
         adata.obs["domain"] = adata.obs["leiden"]
     if refine:
-        print("Refining the clustering results by majority voting")
+        # print("Refining the clustering results by majority voting")
         adata.obs["domain"] = refine_label(adata, radius=radius, key=method)
 
 
