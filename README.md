@@ -24,7 +24,8 @@ Rscript -e "install.packages('mclust')"
 ```
 
 ## Usage
-To get detailed tutorial, please refer to the [tutorial](./tutorial/).
+
+To get a detailed tutorial, please refer to the [tutorials](./tutorial/) and a use case on [Colab](https://colab.research.google.com/drive/1fVL0CZY1ElqoU-uURQPgiAUyb1RJRYmd?usp=sharing).
 
 ### Parameters
 
